@@ -1,0 +1,27 @@
+{
+  "name": "personio-automation",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "cypress run",
+    "test:open": "cypress open",
+    "test:headed": "cypress run --headed",
+    "test:chrome": "cypress run --browser chrome",
+    "test:firefox": "cypress run --browser firefox",
+    "format": "prettier --write 'cypress/e2e/*.cy.js'"
+  },
+  "keywords": [
+    "cypress",
+    "automation",
+    "personio",
+    "testing"
+  ],
+  "author": "",
+  "license": "ISC",
+  "description": "Cypress automation for Personio time tracking",
+  "devDependencies": {
+    "cypress": "^14.5.3",
+    "dotenv": "^17.2.1",
+    "prettier": "^3.4.2"
+  }
+}
