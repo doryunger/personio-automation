@@ -14,12 +14,49 @@ This project automates the filling of empty timecards in Personio with realistic
 
 ## Setup
 
-### 1. Install Dependencies
+### 1. Node.js version
+
+Use **Node.js 20 LTS** or newer (required for current Cypress). If you use [nvm](https://github.com/nvm-sh/nvm):
+
+```bash
+nvm install
+nvm use
+```
+
+The repo includes a `.nvmrc` file with `20`.
+
+**Without nvm (e.g. Ubuntu with snap):** if you need Node 20 and do not use nvm, you can install it with snap, then verify and install dependencies from your project directory:
+
+```bash
+
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+# close and reopen the terminal, or: source ~/.bashrc
+nvm install 20
+nvm use 20
+npm install
+
+OR
+
+sudo snap install node --classic --channel=20/stable
+export PATH="/snap/bin:$PATH"
+hash -r
+node -v   # expect v20.x
+npm install
+```
+
+Adjust the `cd` path if your clone lives elsewhere.
+
+If `node -v` still shows **v18** (or npm reports `EBADENGINE` for Node 20), an older system Node from apt (`/usr/bin/node`) is winning on your `PATH`. The `export PATH="/snap/bin:$PATH"` line above makes the snap Node 20 take precedence in **this terminal session**. To make that permanent, add the same `export` line to your `~/.bashrc` (or run `which -a node` to confirm which binary is used).
+
+### 2. Install Dependencies
+
+From the project root (skip if you already ran `npm install` after installing Node with snap above):
+
 ```bash
 npm install
 ```
 
-### 2. Configure Environment Variables
+### 3. Configure Environment Variables
 Create a `.env` file in the project root:
 ```bash
 # Personio Credentials
@@ -29,7 +66,7 @@ PERSONIO_EMPLOYEE_ID=your_employee_id
 PERSONIO_COMPANY_DOMAIN=your-company-domain
 ```
 
-### 3. Make Script Executable
+### 4. Make Script Executable
 ```bash
 chmod +x run-personio-filling.sh
 ```
@@ -133,11 +170,10 @@ This ensures that the total of work hours + time off never exceeds the standard 
 - `cypress/e2e/personio-monthly-filling.cy.js` - Main automation script
 - `run-personio-filling.sh` - Bash script to run with environment variables
 - `.env` - Environment variables (create this file)
-- `cypress/logs/` - Debug logs for troubleshooting
 
 ## Troubleshooting
 
-Check the debug logs in `cypress/logs/personio-monthly-filling-debug.log` for detailed information about the automation process.
+Use the Cypress run output in the terminal, or `npx cypress open` and the Command Log in the UI, to see step-by-step messages from the test.
 
 ## Automated Scheduling
 
@@ -146,7 +182,7 @@ The script is configured to run automatically on the first day of each month at 
 
 **Cron Job Details:**
 ```bash
-30 9 1 * * cd /home/dory/git/personio-automation && ./run-personio-filling.sh >> logs/personio-cron.log 2>&1
+30 9 1 * * cd /home/dory/git/personio-automation && ./run-personio-filling.sh
 ```
 
 **What this does:**
@@ -154,17 +190,13 @@ The script is configured to run automatically on the first day of each month at 
 - Automatically fills the previous month's timecards (using default `PREVIOUS_MONTH=true`)
 - Runs in headless mode (no browser window, perfect for automated execution)
 - Changes to the project directory before running
-- Logs output to `logs/personio-cron.log`
 - Works reliably for all months (including February with 28/29 days)
+
+Append `>> /path/to/your.log 2>&1` to the cron line if you want a log file on disk.
 
 **To check if the cron job is active:**
 ```bash
 crontab -l
-```
-
-**To view the logs:**
-```bash
-tail -f logs/personio-cron.log
 ```
 
 **To test the cron logic:**
@@ -174,6 +206,6 @@ tail -f logs/personio-cron.log
 
 ## Requirements
 
-- Node.js 18+
-- Cypress 14+
+- Node.js 20+ (LTS recommended; see `.nvmrc`)
+- Cypress 15+ (install via `npm install`; requires Node 20+)
 - Valid Personio account with API access 

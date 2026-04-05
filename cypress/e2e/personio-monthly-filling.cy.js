@@ -1,14 +1,7 @@
 describe("Fill Empty Timecards", () => {
   it("should fill empty timecards with random start times and calculated end times", () => {
-    cy.writeFile("cypress/logs/fill-empty-timecards-debug.log", "");
-
-    const logToFile = (message) => {
+    const logStep = (message) => {
       cy.log(message);
-      cy.writeFile(
-        "cypress/logs/fill-empty-timecards-debug.log",
-        `${new Date().toISOString()}: ${message}\n`,
-        { flag: "a+" },
-      );
     };
 
     const companyDomain = Cypress.env("PERSONIO_COMPANY_DOMAIN") || "";
@@ -17,8 +10,8 @@ describe("Fill Empty Timecards", () => {
     const employeeId = Cypress.env("PERSONIO_EMPLOYEE_ID") || "";
     const previousMonth = Cypress.env("PREVIOUS_MONTH") === "true";
 
-    logToFile("Starting fill empty timecards test");
-    logToFile(`Previous month mode: ${previousMonth}`);
+    logStep("Starting fill empty timecards test");
+    logStep(`Previous month mode: ${previousMonth}`);
 
     if (!companyDomain || !username || !password || !employeeId) {
       const missingVars = [];
@@ -27,7 +20,7 @@ describe("Fill Empty Timecards", () => {
       if (!password) missingVars.push("PERSONIO_PASSWORD");
       if (!employeeId) missingVars.push("PERSONIO_EMPLOYEE_ID");
 
-      logToFile(
+      logStep(
         `❌ ERROR: Missing required environment variables: ${missingVars.join(", ")}`,
       );
       throw new Error(
@@ -44,14 +37,14 @@ describe("Fill Empty Timecards", () => {
         currentDate.getMonth() - 1,
         1,
       );
-      logToFile("Targeting previous month for timecard filling");
+      logStep("Targeting previous month for timecard filling");
     } else {
       targetDate = new Date(
         currentDate.getFullYear(),
         currentDate.getMonth(),
         1,
       );
-      logToFile("Targeting current month for timecard filling");
+      logStep("Targeting current month for timecard filling");
     }
 
     const targetYear = targetDate.getFullYear();
@@ -61,22 +54,22 @@ describe("Fill Empty Timecards", () => {
     const lastDay = new Date(targetYear, targetMonth, 0).getDate();
     const endDate = `${targetYear}-${targetMonth.toString().padStart(2, "0")}-${lastDay.toString().padStart(2, "0")}`;
 
-    logToFile(`Target period: ${startDate} to ${endDate}`);
+    logStep(`Target period: ${startDate} to ${endDate}`);
 
     const companyLoginUrl = `https://${companyDomain}.app.personio.com/login`;
-    logToFile(`Attempting direct login to: ${companyLoginUrl}`);
+    logStep(`Attempting direct login to: ${companyLoginUrl}`);
 
     cy.visit(companyLoginUrl);
-    logToFile("Visited company-specific login page");
+    logStep("Visited company-specific login page");
 
     cy.get("body").should("be.visible");
     cy.wait(3000);
 
     cy.url().then((url) => {
-      logToFile(`Current URL after visit: ${url}`);
+      logStep(`Current URL after visit: ${url}`);
 
       if (url.includes("login.personio.com")) {
-        logToFile("Redirected to main login page, trying original approach");
+        logStep("Redirected to main login page, trying original approach");
 
         cy.window().then((win) => {
           delete win.navigator.webdriver;
@@ -95,7 +88,7 @@ describe("Fill Empty Timecards", () => {
               'button:contains("Alles akzeptieren"), button:contains("Accept All")',
             ).length > 0
           ) {
-            logToFile("Cookie consent dialog detected, clicking Accept All");
+            logStep("Cookie consent dialog detected, clicking Accept All");
             cy.get(
               'button:contains("Alles akzeptieren"), button:contains("Accept All")',
             )
@@ -106,11 +99,11 @@ describe("Fill Empty Timecards", () => {
         });
 
         cy.get("body").then(($body) => {
-          logToFile("Looking for input elements on login page...");
+          logStep("Looking for input elements on login page...");
           cy.get("input").then(($inputs) => {
-            logToFile(`Found ${$inputs.length} input elements`);
+            logStep(`Found ${$inputs.length} input elements`);
             $inputs.each((i, input) => {
-              logToFile(
+              logStep(
                 `Input ${i}: type="${input.type}", name="${input.name}", placeholder="${input.placeholder}", id="${input.id}"`,
               );
             });
@@ -125,7 +118,7 @@ describe("Fill Empty Timecards", () => {
           .first()
           .clear({ force: true })
           .type(username, { force: true });
-        logToFile(`Filled email/username: ${username}`);
+        logStep(`Filled email/username: ${username}`);
 
         cy.get(
           'button:contains("Continue"), button:contains("Weiter"), button[type="submit"]',
@@ -133,9 +126,9 @@ describe("Fill Empty Timecards", () => {
           .should("be.visible")
           .first()
           .click({ force: true });
-        logToFile("Clicked Continue button");
+        logStep("Clicked Continue button");
       } else {
-        logToFile("Successfully on company login page, proceeding with login");
+        logStep("Successfully on company login page, proceeding with login");
 
         cy.get('input[name="username"], input[id="username"]', {
           timeout: 15000,
@@ -145,7 +138,7 @@ describe("Fill Empty Timecards", () => {
           .first()
           .clear({ force: true })
           .type(username, { force: true });
-        logToFile(`Filled email/username: ${username}`);
+        logStep(`Filled email/username: ${username}`);
 
         cy.get(
           'button:contains("Continue"), button:contains("Weiter"), button[type="submit"]',
@@ -153,7 +146,7 @@ describe("Fill Empty Timecards", () => {
           .should("be.visible")
           .first()
           .click({ force: true });
-        logToFile("Clicked Continue button");
+        logStep("Clicked Continue button");
       }
     });
 
@@ -161,12 +154,12 @@ describe("Fill Empty Timecards", () => {
 
     cy.get('input[type="password"]', { timeout: 15000 }).should("be.visible");
 
-    logToFile(`About to fill password field with: ${password}`);
+    logStep(`About to fill password field with: ${password}`);
     cy.get('input[type="password"]')
       .first()
       .clear({ force: true })
       .type(password, { force: true });
-    logToFile("Filled password");
+    logStep("Filled password");
 
     cy.get(
       'button[type="submit"], button:contains("Sign in"), button:contains("Login"), button:contains("Einloggen")',
@@ -174,29 +167,24 @@ describe("Fill Empty Timecards", () => {
       .should("be.visible")
       .first()
       .click({ force: true });
-    logToFile("Submitted login credentials");
+    logStep("Submitted login credentials");
 
     cy.wait(5000);
-    logToFile("Navigated to company app domain");
+    logStep("Navigated to company app domain");
 
     cy.origin(
       "https://alpine-eagle-gmbh.app.personio.com",
       { args: { employeeId, startDate, endDate, previousMonth, targetDate } },
       ({ employeeId, startDate, endDate, previousMonth, targetDate }) => {
-        const logToFile = (message) => {
+        const logStep = (message) => {
           cy.log(message);
-          cy.writeFile(
-            "cypress/logs/fill-empty-timecards-debug.log",
-            `${new Date().toISOString()}: ${message}\n`,
-            { flag: "a+" },
-          );
         };
 
         cy.wait(5000);
-        logToFile("Navigated to company app domain");
+        logStep("Navigated to company app domain");
 
         cy.url().should("include", "alpine-eagle-gmbh.app.personio.com");
-        logToFile("Successfully logged in to company domain");
+        logStep("Successfully logged in to company domain");
 
         cy.wait(3000);
 
@@ -326,7 +314,7 @@ describe("Fill Empty Timecards", () => {
           return false;
         };
 
-        logToFile(
+        logStep(
           `Starting to process empty timecards for period: ${startDate} to ${endDate}...`,
         );
 
@@ -337,16 +325,16 @@ describe("Fill Empty Timecards", () => {
           );
           if (csrfCookie) {
             csrfToken = csrfCookie.value;
-            logToFile(
+            logStep(
               `Found CSRF token in cookie: ${csrfToken.substring(0, 50)}...`,
             );
           } else {
-            logToFile(
+            logStep(
               "⚠️ CSRF token not found in cookies, will try to get from API response",
             );
           }
 
-          logToFile(
+          logStep(
             `Fetching timesheet for period: ${startDate} to ${endDate}`,
           );
 
@@ -377,18 +365,18 @@ describe("Fill Empty Timecards", () => {
                 const match = xsrfCookie.match(/ATHENA-XSRF-TOKEN=([^;]+)/);
                 if (match) {
                   csrfToken = match[1];
-                  logToFile(
+                  logStep(
                     `Extracted CSRF token from response: ${csrfToken.substring(0, 50)}...`,
                   );
                 }
               }
             }
-            logToFile(`Timesheet API response status: ${response.status}`);
-            logToFile(
+            logStep(`Timesheet API response status: ${response.status}`);
+            logStep(
               `Response headers: ${JSON.stringify(response.headers, null, 2)}`,
             );
-            logToFile(`Response body type: ${typeof response.body}`);
-            logToFile(
+            logStep(`Response body type: ${typeof response.body}`);
+            logStep(
               `Response body length: ${response.body ? response.body.length : "null"}`,
             );
 
@@ -400,22 +388,22 @@ describe("Fill Empty Timecards", () => {
                   typeof response.body === "string"
                     ? JSON.parse(response.body)
                     : response.body;
-                logToFile("✅ Successfully fetched timesheet data");
-                logToFile(`Response body keys: ${Object.keys(timesheetData)}`);
+                logStep("✅ Successfully fetched timesheet data");
+                logStep(`Response body keys: ${Object.keys(timesheetData)}`);
 
                 if (!timesheetData.timecards) {
-                  logToFile(
+                  logStep(
                     `❌ No timecards property found in response. Available keys: ${Object.keys(timesheetData)}`,
                   );
                   return;
                 }
 
-                logToFile(
+                logStep(
                   `Total timecards in response: ${timesheetData.timecards.length}`,
                 );
               } catch (error) {
-                logToFile(`❌ JSON parsing error: ${error.message}`);
-                logToFile(
+                logStep(`❌ JSON parsing error: ${error.message}`);
+                logStep(
                   `❌ Response body: ${JSON.stringify(response.body, null, 2)}`,
                 );
                 return;
@@ -432,11 +420,11 @@ describe("Fill Empty Timecards", () => {
                       const timeOffTypes = timecard.time_off.items.map(
                         (item) => item.name || item.type,
                       );
-                      logToFile(
+                      logStep(
                         `✅ Will process empty timecard for date: ${timecard.date} (partial time off: ${timeOffTypes.join(", ")}, ${timeOffDuration} min)`,
                       );
                     } else {
-                      logToFile(
+                      logStep(
                         `✅ Will process empty timecard for date: ${timecard.date}`,
                       );
                     }
@@ -485,11 +473,11 @@ describe("Fill Empty Timecards", () => {
                         skipReasons.push("future date");
                       }
                     }
-                    logToFile(
+                    logStep(
                       `⏭️ Skipping empty timecard for date: ${timecard.date} (${skipReasons.join(", ")})`,
                     );
                   } else if (!isEmpty) {
-                    logToFile(
+                    logStep(
                       `📝 Timecard for date: ${timecard.date} already has periods, skipping`,
                     );
                   }
@@ -498,16 +486,16 @@ describe("Fill Empty Timecards", () => {
                 },
               );
 
-              logToFile(
+              logStep(
                 `Found ${emptyTimecards.length} empty timecards to fill`,
               );
-              logToFile(
+              logStep(
                 `Using CSRF token for PUT requests: ${csrfToken ? csrfToken.substring(0, 50) + "..." : "NOT FOUND"}`,
               );
 
               if (emptyTimecards.length > 0) {
                 emptyTimecards.forEach((timecard, index) => {
-                  logToFile(
+                  logStep(
                     `Processing timecard ${index + 1}/${emptyTimecards.length} for date: ${timecard.date}`,
                   );
 
@@ -516,7 +504,7 @@ describe("Fill Empty Timecards", () => {
 
                   if (timeOffDuration > 0 && timeOffDuration < 480) {
                     targetWorkDuration = 480 - timeOffDuration;
-                    logToFile(
+                    logStep(
                       `⚠️ Partial time off detected: ${timeOffDuration} minutes off, adjusting work duration to ${targetWorkDuration} minutes (${(targetWorkDuration / 60).toFixed(1)} hours)`,
                     );
                   }
@@ -527,7 +515,7 @@ describe("Fill Empty Timecards", () => {
                     targetWorkDuration,
                   );
 
-                  logToFile(
+                  logStep(
                     `Generated start time: ${startTime}, end time: ${endTime}${targetWorkDuration ? ` (adjusted for partial time off)` : ""}`,
                   );
 
@@ -549,7 +537,7 @@ describe("Fill Empty Timecards", () => {
                     is_from_clock_out: false,
                   };
 
-                  logToFile(
+                  logStep(
                     `Create payload for ${timecard.date}: ${JSON.stringify(createPayload, null, 2)}`,
                   );
 
@@ -573,32 +561,32 @@ describe("Fill Empty Timecards", () => {
                     body: createPayload,
                     failOnStatusCode: false,
                   }).then((response) => {
-                    logToFile(
+                    logStep(
                       `PUT API response status for ${timecard.date}: ${response.status}`,
                     );
-                    logToFile(
+                    logStep(
                       `PUT response body: ${JSON.stringify(response.body, null, 2)}`,
                     );
 
                     if (response.status === 200 || response.status === 201) {
-                      logToFile(
+                      logStep(
                         `✅ Successfully updated timecard for ${timecard.date} with day_id: ${dayId}`,
                       );
                     } else {
-                      logToFile(
+                      logStep(
                         `❌ Failed to update timecard for ${timecard.date} with status: ${response.status}`,
                       );
-                      logToFile(
+                      logStep(
                         `Error details: ${JSON.stringify(response.body, null, 2)}`,
                       );
                     }
                   });
                 });
               } else {
-                logToFile("No empty timecards found to fill");
+                logStep("No empty timecards found to fill");
               }
             } else {
-              logToFile(
+              logStep(
                 `❌ Failed to fetch timesheet data: ${response.status}`,
               );
             }
