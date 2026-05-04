@@ -4,11 +4,7 @@ describe("Fill Empty Timecards", () => {
       cy.log(message);
     };
 
-    const companyDomain = Cypress.env("PERSONIO_COMPANY_DOMAIN") || "";
-    const username = Cypress.env("PERSONIO_USERNAME") || "";
-    const password = Cypress.env("PERSONIO_PASSWORD") || "";
-    const employeeId = Cypress.env("PERSONIO_EMPLOYEE_ID") || "";
-    const previousMonth = Cypress.env("PREVIOUS_MONTH") === "true";
+    cy.task("getEnvVars").then(({ companyDomain, username, password, employeeId, previousMonth }) => {
 
     logStep("Starting fill empty timecards test");
     logStep(`Previous month mode: ${previousMonth}`);
@@ -594,5 +590,6 @@ describe("Fill Empty Timecards", () => {
         });
       },
     );
+    }); // cy.task getEnvVars
   });
 });

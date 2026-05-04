@@ -16,15 +16,18 @@ module.exports = defineConfig({
     experimentalModifyObstructiveThirdPartyCode: false,
     // Try to avoid bot detection
     userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    env: {
-      PERSONIO_USERNAME: process.env.PERSONIO_USERNAME || '',
-      PERSONIO_PASSWORD: process.env.PERSONIO_PASSWORD || '',
-      PERSONIO_EMPLOYEE_ID: process.env.PERSONIO_EMPLOYEE_ID || '',
-      PERSONIO_COMPANY_DOMAIN: process.env.PERSONIO_COMPANY_DOMAIN || '',
-      PREVIOUS_MONTH: process.env.PREVIOUS_MONTH || 'false'
-    },
     setupNodeEvents(on, config) {
-      // implement node event listeners here
+      on('task', {
+        getEnvVars() {
+          return {
+            companyDomain: process.env.PERSONIO_COMPANY_DOMAIN || '',
+            username: process.env.PERSONIO_USERNAME || '',
+            password: process.env.PERSONIO_PASSWORD || '',
+            employeeId: process.env.PERSONIO_EMPLOYEE_ID || '',
+            previousMonth: process.env.PREVIOUS_MONTH === 'true',
+          }
+        }
+      })
       on('before:browser:launch', (browser, launchOptions) => {
         if (browser.name === 'chrome') {
           // Add arguments to make it look more like a real browser
