@@ -213,12 +213,77 @@ describe("Fill Empty Timecards", () => {
           );
         };
 
+        const getTimeOffItems = (timecard) => {
+          return timecard.time_off?.items || [];
+        };
+
+        const getTimeOffLabel = (item) => {
+          return String(item.name || item.type || item.category || "").toLowerCase();
+        };
+
+        // Krankheit/sickness is a day off by default — only fill hours when
+        // Personio gives an explicit partial duration (< full day).
+        const isKrankheitItem = (item) => {
+          const label = getTimeOffLabel(item);
+          return (
+            label.includes("krankheit") ||
+            label.includes("sick") ||
+            label.includes("sickness") ||
+            label.includes("illness")
+          );
+        };
+
+        const isFullDayDuration = (durationMinutes) => {
+          return (
+            durationMinutes === null ||
+            durationMinutes === undefined ||
+            durationMinutes === 480
+          );
+        };
+
+        const isPartialDuration = (durationMinutes) => {
+          return (
+            typeof durationMinutes === "number" &&
+            durationMinutes > 0 &&
+            durationMinutes < 480
+          );
+        };
+
+        const hasKrankheitWithoutPartialHours = (timecard) => {
+          const items = getTimeOffItems(timecard);
+          const krankheitItems = items.filter(isKrankheitItem);
+          if (krankheitItems.length === 0) {
+            return false;
+          }
+
+          // If any Krankheit entry has an explicit partial duration, Personio
+          // still expects remaining work hours for that day.
+          const hasExplicitPartial = krankheitItems.some((item) =>
+            isPartialDuration(item.duration_minutes),
+          );
+          if (hasExplicitPartial) {
+            return false;
+          }
+
+          return true;
+        };
+
+        const hasFullDayTimeOff = (timecard) => {
+          const items = getTimeOffItems(timecard);
+          if (items.length === 0) {
+            return false;
+          }
+
+          if (timecard.time_off.aggregated_duration_minutes === 480) {
+            return true;
+          }
+
+          return items.some((item) => isFullDayDuration(item.duration_minutes));
+        };
+
         const getTimeOffDuration = (timecard) => {
-          if (
-            !timecard.time_off ||
-            !timecard.time_off.items ||
-            timecard.time_off.items.length === 0
-          ) {
+          const items = getTimeOffItems(timecard);
+          if (items.length === 0) {
             return 0;
           }
 
@@ -229,9 +294,11 @@ describe("Fill Empty Timecards", () => {
             return timecard.time_off.aggregated_duration_minutes;
           }
 
-          const totalDuration = timecard.time_off.items.reduce((sum, item) => {
-            const duration =
-              item.duration_minutes === null ? 480 : item.duration_minutes;
+          const totalDuration = items.reduce((sum, item) => {
+            // null/undefined duration means full-day absence (8h)
+            const duration = isFullDayDuration(item.duration_minutes)
+              ? 480
+              : item.duration_minutes;
             return sum + (duration || 0);
           }, 0);
 
@@ -272,19 +339,13 @@ describe("Fill Empty Timecards", () => {
             return true;
           }
 
-          const timeOffDuration = getTimeOffDuration(timecard);
-          if (timeOffDuration > 0) {
-            const timeOffItems = timecard.time_off.items;
-            const hasFullDayOff = timeOffItems.some(
-              (item) =>
-                item.duration_minutes === null || item.duration_minutes === 480,
-            );
-            if (
-              hasFullDayOff ||
-              timecard.time_off.aggregated_duration_minutes === 480
-            ) {
-              return true;
-            }
+          // Krankheit without an explicit partial duration → treat like a day off
+          if (hasKrankheitWithoutPartialHours(timecard)) {
+            return true;
+          }
+
+          if (hasFullDayTimeOff(timecard)) {
+            return true;
           }
 
           if (previousMonth) {
@@ -427,25 +488,20 @@ describe("Fill Empty Timecards", () => {
                   } else if (isEmpty && shouldSkip) {
                     const skipReasons = [];
                     if (timecard.is_off_day) skipReasons.push("off day");
-                    const timeOffDuration = getTimeOffDuration(timecard);
-                    if (timeOffDuration > 0) {
-                      const timeOffItems = timecard.time_off.items;
-                      const hasFullDayOff = timeOffItems.some(
-                        (item) =>
-                          item.duration_minutes === null ||
-                          item.duration_minutes === 480,
+                    if (hasKrankheitWithoutPartialHours(timecard)) {
+                      const timeOffTypes = getTimeOffItems(timecard)
+                        .filter(isKrankheitItem)
+                        .map((item) => item.name || item.type);
+                      skipReasons.push(
+                        `Krankheit/sickness (${timeOffTypes.join(", ")}) — no hours`,
                       );
-                      if (
-                        hasFullDayOff ||
-                        timecard.time_off.aggregated_duration_minutes === 480
-                      ) {
-                        const timeOffTypes = timecard.time_off.items.map(
-                          (item) => item.name || item.type,
-                        );
-                        skipReasons.push(
-                          `full day time off (${timeOffTypes.join(", ")})`,
-                        );
-                      }
+                    } else if (hasFullDayTimeOff(timecard)) {
+                      const timeOffTypes = getTimeOffItems(timecard).map(
+                        (item) => item.name || item.type,
+                      );
+                      skipReasons.push(
+                        `full day time off (${timeOffTypes.join(", ")})`,
+                      );
                     }
                     if (previousMonth) {
                       const targetYear = targetDate.getFullYear();
