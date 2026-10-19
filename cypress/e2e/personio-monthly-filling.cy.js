@@ -2,8 +2,10 @@ describe("Fill Empty Timecards", () => {
   it("should fill empty timecards with random start times and calculated end times", () => {
     const logStep = (message) => {
       cy.log(message);
+      cy.task("logToFile", message, { log: false });
     };
 
+    cy.task("clearLogFile", null, { log: false });
     cy.task("getEnvVars").then(({ companyDomain, username, password, employeeId, previousMonth }) => {
 
     logStep("Starting fill empty timecards test");
@@ -174,6 +176,7 @@ describe("Fill Empty Timecards", () => {
       ({ employeeId, startDate, endDate, previousMonth, targetDate }) => {
         const logStep = (message) => {
           cy.log(message);
+          cy.task("logToFile", message, { log: false });
         };
 
         cy.wait(5000);
@@ -221,6 +224,32 @@ describe("Fill Empty Timecards", () => {
           return String(item.name || item.type || item.category || "").toLowerCase();
         };
 
+        // Home Office is "productive" time off in Personio — you still work and
+        // must track hours. It appears under time_off but must not be treated
+        // like vacation/sickness.
+        const isHomeOfficeItem = (item) => {
+          if (item.is_offsite_work_absence === true) {
+            return true;
+          }
+          const label = getTimeOffLabel(item);
+          const category = String(item.category || "").toLowerCase();
+          return (
+            category === "offsite_work" ||
+            label.includes("home office") ||
+            label.includes("homeoffice") ||
+            label.includes("home-office") ||
+            label.includes("remote work") ||
+            label.includes("remote working") ||
+            label.includes("arbeit von zuhause") ||
+            label.includes("mobile arbeit")
+          );
+        };
+
+        // Real absences only (exclude productive time off like Home Office).
+        const getAbsenceTimeOffItems = (timecard) => {
+          return getTimeOffItems(timecard).filter((item) => !isHomeOfficeItem(item));
+        };
+
         // Krankheit/sickness is a day off by default — only fill hours when
         // Personio gives an explicit partial duration (< full day).
         const isKrankheitItem = (item) => {
@@ -250,7 +279,7 @@ describe("Fill Empty Timecards", () => {
         };
 
         const hasKrankheitWithoutPartialHours = (timecard) => {
-          const items = getTimeOffItems(timecard);
+          const items = getAbsenceTimeOffItems(timecard);
           const krankheitItems = items.filter(isKrankheitItem);
           if (krankheitItems.length === 0) {
             return false;
@@ -269,12 +298,18 @@ describe("Fill Empty Timecards", () => {
         };
 
         const hasFullDayTimeOff = (timecard) => {
-          const items = getTimeOffItems(timecard);
+          const items = getAbsenceTimeOffItems(timecard);
           if (items.length === 0) {
             return false;
           }
 
-          if (timecard.time_off.aggregated_duration_minutes === 480) {
+          // Only trust the aggregate when no Home Office items are mixed in;
+          // otherwise Home Office can inflate the total and look like vacation.
+          const hasHomeOffice = getTimeOffItems(timecard).some(isHomeOfficeItem);
+          if (
+            !hasHomeOffice &&
+            timecard.time_off.aggregated_duration_minutes === 480
+          ) {
             return true;
           }
 
@@ -282,12 +317,14 @@ describe("Fill Empty Timecards", () => {
         };
 
         const getTimeOffDuration = (timecard) => {
-          const items = getTimeOffItems(timecard);
+          const items = getAbsenceTimeOffItems(timecard);
           if (items.length === 0) {
             return 0;
           }
 
+          const hasHomeOffice = getTimeOffItems(timecard).some(isHomeOfficeItem);
           if (
+            !hasHomeOffice &&
             timecard.time_off.aggregated_duration_minutes !== null &&
             timecard.time_off.aggregated_duration_minutes !== undefined
           ) {
@@ -371,20 +408,124 @@ describe("Fill Empty Timecards", () => {
           return false;
         };
 
+        const isDeprecatedCsrf = (value) => {
+          return (
+            !value ||
+            value.includes("deprecated") ||
+            value.startsWith("00000000-0000-0000-0000-000000000000")
+          );
+        };
+
+        const pickCsrfFromCookies = (cookies) => {
+          const preferredNames = [
+            "ATHENA-XSRF-TOKEN",
+            "XSRF-TOKEN",
+            "CSRF-TOKEN",
+            "_csrf",
+          ];
+          const byName = Object.fromEntries(
+            cookies.map((c) => [c.name, c.value]),
+          );
+
+          logStep(
+            `Cookies present: ${cookies
+              .map((c) => `${c.name}=${String(c.value).substring(0, 40)}`)
+              .join(" | ")}`,
+          );
+
+          for (const name of preferredNames) {
+            const value = byName[name];
+            if (value && !isDeprecatedCsrf(value)) {
+              return { name, value };
+            }
+          }
+
+          // Fall back to ATHENA even if deprecated so we can log it
+          if (byName["ATHENA-XSRF-TOKEN"]) {
+            return {
+              name: "ATHENA-XSRF-TOKEN",
+              value: byName["ATHENA-XSRF-TOKEN"],
+            };
+          }
+          return null;
+        };
+
+        const extractCsrfFromSetCookie = (headers) => {
+          if (!headers["set-cookie"]) {
+            return null;
+          }
+          const setCookieHeader = Array.isArray(headers["set-cookie"])
+            ? headers["set-cookie"]
+            : [headers["set-cookie"]];
+          for (const cookie of setCookieHeader) {
+            const match = cookie.match(
+              /(?:ATHENA-XSRF-TOKEN|XSRF-TOKEN)=([^;]+)/i,
+            );
+            if (match && !isDeprecatedCsrf(match[1])) {
+              return match[1];
+            }
+          }
+          return null;
+        };
+
+        const buildApiHeaders = (csrfToken) => {
+          const headers = {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+          };
+          if (csrfToken && !isDeprecatedCsrf(csrfToken)) {
+            headers["X-CSRF-Token"] = csrfToken;
+            headers["X-ATHENA-XSRF-TOKEN"] = csrfToken;
+            headers["X-XSRF-TOKEN"] = csrfToken;
+          }
+          return headers;
+        };
+
+        // Warm up the attendance UI so Personio issues a real CSRF cookie
+        // (ATHENA-XSRF-TOKEN is currently a deprecated placeholder after login).
+        const attendanceUrl = `https://alpine-eagle-gmbh.app.personio.com/attendance/employee/${employeeId}/${startDate}`;
+        logStep(`Visiting attendance page to refresh CSRF: ${attendanceUrl}`);
+        cy.visit(attendanceUrl, { failOnStatusCode: false });
+        cy.wait(3000);
+
+        cy.window().then((win) => {
+          try {
+            const meta = win.document.querySelector(
+              'meta[name="csrf-token"], meta[name="xsrf-token"]',
+            );
+            if (meta?.content) {
+              logStep(
+                `Found CSRF meta tag: ${meta.content.substring(0, 50)}...`,
+              );
+            }
+            const lsKeys = Object.keys(win.localStorage || {});
+            const ssKeys = Object.keys(win.sessionStorage || {});
+            logStep(
+              `Storage keys — localStorage: [${lsKeys.join(", ")}] sessionStorage: [${ssKeys.join(", ")}]`,
+            );
+          } catch (e) {
+            logStep(`Could not inspect page storage: ${e.message}`);
+          }
+        });
+
         logStep(
           `Starting to process empty timecards for period: ${startDate} to ${endDate}...`,
         );
 
         cy.getCookies().then((cookies) => {
           let csrfToken = null;
-          const csrfCookie = cookies.find(
-            (c) => c.name === "ATHENA-XSRF-TOKEN",
-          );
-          if (csrfCookie) {
-            csrfToken = csrfCookie.value;
+          const picked = pickCsrfFromCookies(cookies);
+          if (picked) {
+            csrfToken = picked.value;
             logStep(
-              `Found CSRF token in cookie: ${csrfToken.substring(0, 50)}...`,
+              `Found CSRF token from ${picked.name}: ${csrfToken.substring(0, 50)}...`,
             );
+            if (isDeprecatedCsrf(csrfToken)) {
+              logStep(
+                "⚠️ CSRF token is a deprecated placeholder — PUT writes will likely fail until a real token is obtained",
+              );
+            }
           } else {
             logStep(
               "⚠️ CSRF token not found in cookies, will try to get from API response",
@@ -395,38 +536,18 @@ describe("Fill Empty Timecards", () => {
             `Fetching timesheet for period: ${startDate} to ${endDate}`,
           );
 
-          const headers = {
-            "X-Requested-With": "XMLHttpRequest",
-          };
-          if (csrfToken) {
-            headers["X-CSRF-Token"] = csrfToken;
-            headers["X-ATHENA-XSRF-TOKEN"] = csrfToken;
-          }
-
           cy.request({
             method: "GET",
             url: `https://alpine-eagle-gmbh.app.personio.com/svc/attendance-bff/v1/timesheet/${employeeId}?start_date=${startDate}&end_date=${endDate}&timezone=Europe%2FBerlin`,
-            headers: headers,
+            headers: buildApiHeaders(csrfToken),
             failOnStatusCode: false,
           }).then((response) => {
-            if (!csrfToken && response.headers["set-cookie"]) {
-              const setCookieHeader = Array.isArray(
-                response.headers["set-cookie"],
-              )
-                ? response.headers["set-cookie"]
-                : [response.headers["set-cookie"]];
-              const xsrfCookie = setCookieHeader.find((c) =>
-                c.includes("ATHENA-XSRF-TOKEN"),
+            const refreshed = extractCsrfFromSetCookie(response.headers);
+            if (refreshed) {
+              csrfToken = refreshed;
+              logStep(
+                `Extracted fresh CSRF token from response: ${csrfToken.substring(0, 50)}...`,
               );
-              if (xsrfCookie) {
-                const match = xsrfCookie.match(/ATHENA-XSRF-TOKEN=([^;]+)/);
-                if (match) {
-                  csrfToken = match[1];
-                  logStep(
-                    `Extracted CSRF token from response: ${csrfToken.substring(0, 50)}...`,
-                  );
-                }
-              }
             }
             logStep(`Timesheet API response status: ${response.status}`);
             logStep(
@@ -452,18 +573,23 @@ describe("Fill Empty Timecards", () => {
                   logStep(
                     `❌ No timecards property found in response. Available keys: ${Object.keys(timesheetData)}`,
                   );
-                  return;
+                  throw new Error("No timecards in timesheet response");
                 }
 
                 logStep(
                   `Total timecards in response: ${timesheetData.timecards.length}`,
                 );
+                if (timesheetData.owner_has_propose_rights === false) {
+                  logStep(
+                    "⚠️ owner_has_propose_rights=false — Personio may reject updates (period locked/closed or missing edit rights)",
+                  );
+                }
               } catch (error) {
                 logStep(`❌ JSON parsing error: ${error.message}`);
                 logStep(
                   `❌ Response body: ${JSON.stringify(response.body, null, 2)}`,
                 );
-                return;
+                throw error;
               }
 
               const emptyTimecards = timesheetData.timecards.filter(
@@ -472,9 +598,19 @@ describe("Fill Empty Timecards", () => {
                   const shouldSkip = shouldSkipTimecard(timecard);
 
                   if (isEmpty && !shouldSkip) {
+                    const homeOfficeItems = getTimeOffItems(timecard).filter(
+                      isHomeOfficeItem,
+                    );
                     const timeOffDuration = getTimeOffDuration(timecard);
-                    if (timeOffDuration > 0 && timeOffDuration < 480) {
-                      const timeOffTypes = timecard.time_off.items.map(
+                    if (homeOfficeItems.length > 0) {
+                      const homeOfficeTypes = homeOfficeItems.map(
+                        (item) => item.name || item.type,
+                      );
+                      logStep(
+                        `✅ Will process empty timecard for date: ${timecard.date} (Home Office: ${homeOfficeTypes.join(", ")} — still filling work hours)`,
+                      );
+                    } else if (timeOffDuration > 0 && timeOffDuration < 480) {
+                      const timeOffTypes = getAbsenceTimeOffItems(timecard).map(
                         (item) => item.name || item.type,
                       );
                       logStep(
@@ -489,14 +625,14 @@ describe("Fill Empty Timecards", () => {
                     const skipReasons = [];
                     if (timecard.is_off_day) skipReasons.push("off day");
                     if (hasKrankheitWithoutPartialHours(timecard)) {
-                      const timeOffTypes = getTimeOffItems(timecard)
+                      const timeOffTypes = getAbsenceTimeOffItems(timecard)
                         .filter(isKrankheitItem)
                         .map((item) => item.name || item.type);
                       skipReasons.push(
                         `Krankheit/sickness (${timeOffTypes.join(", ")}) — no hours`,
                       );
                     } else if (hasFullDayTimeOff(timecard)) {
-                      const timeOffTypes = getTimeOffItems(timecard).map(
+                      const timeOffTypes = getAbsenceTimeOffItems(timecard).map(
                         (item) => item.name || item.type,
                       );
                       skipReasons.push(
@@ -545,101 +681,137 @@ describe("Fill Empty Timecards", () => {
                 `Using CSRF token for PUT requests: ${csrfToken ? csrfToken.substring(0, 50) + "..." : "NOT FOUND"}`,
               );
 
-              if (emptyTimecards.length > 0) {
-                emptyTimecards.forEach((timecard, index) => {
+              if (emptyTimecards.length === 0) {
+                logStep("No empty timecards found to fill");
+                return;
+              }
+
+              // Personio replaced PUT /days/:day_id (now 501) with bulk
+              // createBulkAttendanceDays: PUT /svc/attendance-api/v1/days
+              // Body uses dates[] + HH:mm period times (not full ISO datetimes).
+              const writeUrl =
+                "https://alpine-eagle-gmbh.app.personio.com/svc/attendance-api/v1/days";
+
+              const buildBulkPayload = (timecard, startTime, endTime) => {
+                return {
+                  dates: [timecard.date],
+                  employee_id: Number(employeeId) || employeeId,
+                  periods: [
+                    {
+                      start: startTime,
+                      start_day_delta: 0,
+                      end: endTime,
+                      end_day_delta: 0,
+                      type: "work",
+                      comment: null,
+                      project_id: null,
+                    },
+                  ],
+                };
+              };
+
+              let successCount = 0;
+              let failCount = 0;
+
+              const processNext = (i) => {
+                if (i >= emptyTimecards.length) {
                   logStep(
-                    `Processing timecard ${index + 1}/${emptyTimecards.length} for date: ${timecard.date}`,
+                    `Finished updates: ${successCount} succeeded, ${failCount} failed (of ${emptyTimecards.length})`,
                   );
-
-                  const timeOffDuration = getTimeOffDuration(timecard);
-                  let targetWorkDuration = null;
-
-                  if (timeOffDuration > 0 && timeOffDuration < 480) {
-                    targetWorkDuration = 480 - timeOffDuration;
-                    logStep(
-                      `⚠️ Partial time off detected: ${timeOffDuration} minutes off, adjusting work duration to ${targetWorkDuration} minutes (${(targetWorkDuration / 60).toFixed(1)} hours)`,
+                  if (failCount > 0 || successCount === 0) {
+                    throw new Error(
+                      `Timecard updates incomplete: ${successCount} ok, ${failCount} failed`,
                     );
                   }
+                  return;
+                }
 
-                  const startTime = generateRandomStartTime();
-                  const endTime = calculateEndTime(
-                    startTime,
-                    targetWorkDuration,
-                  );
+                const timecard = emptyTimecards[i];
+                logStep(
+                  `Processing timecard ${i + 1}/${emptyTimecards.length} for date: ${timecard.date}`,
+                );
 
+                const timeOffDuration = getTimeOffDuration(timecard);
+                let targetWorkDuration = null;
+
+                if (timeOffDuration > 0 && timeOffDuration < 480) {
+                  targetWorkDuration = 480 - timeOffDuration;
                   logStep(
-                    `Generated start time: ${startTime}, end time: ${endTime}${targetWorkDuration ? ` (adjusted for partial time off)` : ""}`,
+                    `⚠️ Partial time off detected: ${timeOffDuration} minutes off, adjusting work duration to ${targetWorkDuration} minutes (${(targetWorkDuration / 60).toFixed(1)} hours)`,
                   );
+                }
 
-                  const newPeriod = {
-                    id: generateUUID(),
-                    comment: null,
-                    period_type: "work",
-                    project_id: null,
-                    start: `${timecard.date}T${startTime}:00`,
-                    end: `${timecard.date}T${endTime}:00`,
-                    auto_generated: false,
-                  };
+                const startTime = generateRandomStartTime();
+                const endTime = calculateEndTime(
+                  startTime,
+                  targetWorkDuration,
+                );
 
-                  const createPayload = {
-                    employee_id: employeeId,
-                    periods: [newPeriod],
-                    original_periods: null,
-                    geolocation: null,
-                    is_from_clock_out: false,
-                  };
+                logStep(
+                  `Generated start time: ${startTime}, end time: ${endTime}${targetWorkDuration ? ` (adjusted for partial time off)` : ""}`,
+                );
 
+                const createPayload = buildBulkPayload(
+                  timecard,
+                  startTime,
+                  endTime,
+                );
+
+                logStep(
+                  `Create payload for ${timecard.date}: ${JSON.stringify(createPayload, null, 2)}`,
+                );
+
+                cy.request({
+                  method: "PUT",
+                  url: writeUrl,
+                  headers: buildApiHeaders(csrfToken),
+                  body: createPayload,
+                  failOnStatusCode: false,
+                }).then((writeResponse) => {
                   logStep(
-                    `Create payload for ${timecard.date}: ${JSON.stringify(createPayload, null, 2)}`,
+                    `PUT API response status for ${timecard.date}: ${writeResponse.status}`,
+                  );
+                  logStep(
+                    `PUT response body: ${JSON.stringify(writeResponse.body, null, 2)}`,
                   );
 
-                  const dayId = timecard.day_id || generateUUID();
-                  const apiUrl = `https://alpine-eagle-gmbh.app.personio.com/svc/attendance-api/v1/days/${dayId}`;
-                  const method = "PUT";
-
-                  const putHeaders = {
-                    "Content-Type": "application/json",
-                    "X-Requested-With": "XMLHttpRequest",
-                  };
-                  if (csrfToken) {
-                    putHeaders["X-CSRF-Token"] = csrfToken;
-                    putHeaders["X-ATHENA-XSRF-TOKEN"] = csrfToken;
-                  }
-
-                  cy.request({
-                    method: method,
-                    url: apiUrl,
-                    headers: putHeaders,
-                    body: createPayload,
-                    failOnStatusCode: false,
-                  }).then((response) => {
+                  if (
+                    writeResponse.status === 200 ||
+                    writeResponse.status === 201
+                  ) {
+                    successCount += 1;
                     logStep(
-                      `PUT API response status for ${timecard.date}: ${response.status}`,
+                      `✅ Successfully updated timecard for ${timecard.date}`,
+                    );
+                  } else {
+                    failCount += 1;
+                    logStep(
+                      `❌ Failed to update timecard for ${timecard.date} with status: ${writeResponse.status}`,
                     );
                     logStep(
-                      `PUT response body: ${JSON.stringify(response.body, null, 2)}`,
+                      `Error details: ${JSON.stringify(writeResponse.body, null, 2)}`,
                     );
-
-                    if (response.status === 200 || response.status === 201) {
+                    if (
+                      writeResponse.status === 403 ||
+                      writeResponse.status === 409 ||
+                      writeResponse.status === 422
+                    ) {
                       logStep(
-                        `✅ Successfully updated timecard for ${timecard.date} with day_id: ${dayId}`,
-                      );
-                    } else {
-                      logStep(
-                        `❌ Failed to update timecard for ${timecard.date} with status: ${response.status}`,
-                      );
-                      logStep(
-                        `Error details: ${JSON.stringify(response.body, null, 2)}`,
+                        `⚠️ Likely cause for ${timecard.date}: attendance period locked/closed, day already approved, or missing edit rights`,
                       );
                     }
-                  });
+                  }
+                  processNext(i + 1);
                 });
-              } else {
-                logStep("No empty timecards found to fill");
-              }
+              };
+
+              processNext(0);
             } else {
               logStep(
                 `❌ Failed to fetch timesheet data: ${response.status}`,
+              );
+              throw new Error(
+                `Failed to fetch timesheet data: ${response.status}`,
               );
             }
           });

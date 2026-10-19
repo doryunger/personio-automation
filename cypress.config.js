@@ -17,6 +17,10 @@ module.exports = defineConfig({
     // Try to avoid bot detection
     userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     setupNodeEvents(on, config) {
+      const fs = require('fs')
+      const path = require('path')
+      const logFile = path.join(__dirname, 'cypress/logs/fill-empty-timecards-debug.log')
+
       on('task', {
         getEnvVars() {
           return {
@@ -26,7 +30,20 @@ module.exports = defineConfig({
             employeeId: process.env.PERSONIO_EMPLOYEE_ID || '',
             previousMonth: process.env.PREVIOUS_MONTH === 'true',
           }
-        }
+        },
+        logToFile(message) {
+          const line = `${new Date().toISOString()}: ${message}\n`
+          fs.mkdirSync(path.dirname(logFile), { recursive: true })
+          fs.appendFileSync(logFile, line)
+          // Also mirror to the terminal so headless runs are debuggable
+          console.log(message)
+          return null
+        },
+        clearLogFile() {
+          fs.mkdirSync(path.dirname(logFile), { recursive: true })
+          fs.writeFileSync(logFile, '')
+          return null
+        },
       })
       on('before:browser:launch', (browser, launchOptions) => {
         if (browser.name === 'chrome') {

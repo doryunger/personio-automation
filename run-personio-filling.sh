@@ -74,9 +74,12 @@ echo "  PERSONIO_EMPLOYEE_ID: '$PERSONIO_EMPLOYEE_ID'"
 echo "  PERSONIO_COMPANY_DOMAIN: '$PERSONIO_COMPANY_DOMAIN'"
 echo "  PREVIOUS_MONTH: '$PREVIOUS_MONTH_ENV'"
 
-npx cypress run \
+if npx cypress run \
     --spec "cypress/e2e/personio-monthly-filling.cy.js" \
     $HEADED_FLAG \
-    --browser electron
-
-echo "✅ Personio monthly filling completed!" 
+    --browser electron; then
+    echo "✅ Personio monthly filling completed!"
+else
+    echo "❌ Personio monthly filling failed — check cypress/logs/fill-empty-timecards-debug.log"
+    exit 1
+fi 
